@@ -11,12 +11,13 @@ import type { TerminalTab } from "./terminal-tab-state";
 interface Props {
   tab: TerminalTab;
   active: boolean;
+  onNew: () => void;
   onRestart: () => void;
   onClosed: () => void;
   onCloseError: () => void;
 }
 
-export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError }: Props) {
+export function TerminalPanel({ tab, active, onNew, onRestart, onClosed, onCloseError }: Props) {
   const { t } = useI18n();
   const { id, cwd, restored } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -206,18 +207,26 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError }
           <span className={`terminal-status-dot is-${status}`} title={t(`terminal.${status}`)} />
           <span title={cwd}>{cwd}</span>
         </div>
-        {status === "error" && (
-          <button type="button" onClick={() => setReconnectKey((key) => key + 1)} disabled={Boolean(tab.closing)} title={t("terminal.reconnect")} aria-label={t("terminal.reconnect")}>
+        <div className="terminal-panel-actions">
+          <button type="button" onClick={onNew} disabled={Boolean(tab.closing)} title={t("terminal.newIn", { cwd })} aria-label={t("terminal.new")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            {t("terminal.new")}
+          </button>
+          {status === "error" && (
+            <button type="button" onClick={() => setReconnectKey((key) => key + 1)} disabled={Boolean(tab.closing)} title={t("terminal.reconnect")} aria-label={t("terminal.reconnect")}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2" />
+              </svg>
+            </button>
+          )}
+          <button type="button" onClick={onRestart} disabled={Boolean(tab.closing)} title={t("terminal.restart")} aria-label={t("terminal.restart")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2" />
+              <path d="M20 11a8 8 0 1 0-2.34 5.66" /><polyline points="20 4 20 11 13 11" />
             </svg>
           </button>
-        )}
-        <button type="button" onClick={onRestart} disabled={Boolean(tab.closing)} title={t("terminal.restart")} aria-label={t("terminal.restart")}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M20 11a8 8 0 1 0-2.34 5.66" /><polyline points="20 4 20 11 13 11" />
-          </svg>
-        </button>
+        </div>
       </header>
       <div>
         {error && <div className="terminal-panel-error" role="alert">{error}</div>}

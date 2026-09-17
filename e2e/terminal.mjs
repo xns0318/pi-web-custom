@@ -20,6 +20,7 @@ const workspace = join(artifacts, "workspace-a");
 const otherWorkspace = join(artifacts, "workspace-b");
 mkdirSync(join(agentDir, "sessions", "test"), { recursive: true });
 mkdirSync(workspace);
+mkdirSync(join(workspace, "nested"));
 mkdirSync(otherWorkspace);
 writeFileSync(join(workspace, "note.txt"), "File viewer fixture\n");
 const timestamp = "2026-09-05T00:00:00.000Z";
@@ -72,8 +73,12 @@ try {
     });
     const ready = () => page.locator(".terminal-panel:visible .is-ready").waitFor();
     const text = () => page.locator(".terminal-panel:visible .xterm-rows").innerText();
+    const savedTerminals = () => page.evaluate(() => JSON.parse(sessionStorage.getItem("pi-web:terminal-tabs")));
+    const escapePattern = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const run = async (command) => {
-      await page.locator(".terminal-panel:visible .xterm-helper-textarea").focus();
+      // Match xterm's own focus(): a hidden tab may still have an old cursor
+      // position while ResizeObserver fits it, so plain focus can scroll ancestors.
+      await page.locator(".terminal-panel:visible .xterm-helper-textarea").evaluate((element) => element.focus({ preventScroll: true }));
       await page.keyboard.type(command);
       await page.keyboard.press("Enter");
     };
@@ -89,6 +94,22 @@ try {
     const hidePanel = async () => {
       const button = page.locator("#file-panel").getByRole("button", { name: "Hide file panel", exact: true, includeHidden: true });
       if (await button.getAttribute("aria-expanded") === "true") await button.click();
+    };
+    const checkLayout = async () => {
+      const dimensions = await page.locator(".terminal-panel:visible").evaluate((element) => {
+        const panel = element.getBoundingClientRect();
+        const screen = element.querySelector(".xterm-screen").getBoundingClientRect();
+        return { panelWidth: panel.width, screenWidth: screen.width, screenHeight: screen.height,
+          fits: screen.left >= panel.left && screen.top >= panel.top && screen.right <= panel.right + 1 && screen.bottom <= panel.bottom + 1 };
+      });
+      assert.ok(dimensions.screenWidth > 100 && dimensions.screenHeight > 100 && dimensions.fits, JSON.stringify(dimensions));
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.waitForFunction(() => {
+        const list = document.querySelector('#file-panel [role="tablist"]');
+        const bounds = list.getBoundingClientRect();
+        const active = list.querySelector('[aria-selected="true"]').getBoundingClientRect();
+        return active.left >= bounds.left - 1 && active.right <= bounds.right + 1;
+      });
     };
     try {
       await page.goto(`${base}/?session=terminal-a1`);
@@ -108,7 +129,7 @@ try {
       await page.getByText("File viewer fixture", { exact: true }).waitFor();
       assert.equal(await page.locator(".terminal-panel").count(), 1);
       assert.equal(await page.locator(".terminal-panel").isVisible(), false);
-      await page.getByRole("tab", { name: "Terminal: workspace-a", exact: true }).click();
+      await page.getByRole("tab", { name: "Terminal: 1: workspace-a", exact: true }).click();
       await ready();
       await hidePanel();
       await showSidebar();
@@ -132,27 +153,73 @@ try {
       assert.equal(((await text()).match(new RegExp(`REFRESH:alive:${pid}`, "g")) ?? []).length, 1, "reconnect must not replay delivered output");
 
       await page.screenshot({ path: join(artifacts, `${viewport.width}.png`), fullPage: true });
-      const dimensions = await page.locator(".terminal-panel:visible").evaluate((element) => {
-        const panel = element.getBoundingClientRect();
-        const screen = element.querySelector(".xterm-screen").getBoundingClientRect();
-        return { panelWidth: panel.width, screenWidth: screen.width, screenHeight: screen.height, fits: screen.right <= panel.right + 1 && screen.bottom <= panel.bottom + 1 };
-      });
-      assert.ok(dimensions.screenWidth > 100 && dimensions.screenHeight > 100 && dimensions.fits, JSON.stringify(dimensions));
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await checkLayout();
+
+      // New means a sibling process, not a restart or a child of the old shell.
+      await run("cd nested; printf '\\nORIGINAL_DIR:%s\\n' \"$PWD\"");
+      await waitOutput(`ORIGINAL_DIR:${escapePattern(join(workspace, "nested"))}`);
+      await page.getByRole("button", { name: "New terminal", exact: true }).click();
+      await ready();
+      assert.equal(await page.locator(".terminal-panel").count(), 2);
+      const multipleTabs = (await savedTerminals()).tabs;
+      assert.deepEqual(multipleTabs.map((tab) => [tab.cwd, tab.number]), [[workspace, 1], [workspace, 2]]);
+      const secondId = multipleTabs[1].id;
+      assert.notEqual(secondId, id);
+      assert.equal(created.size, 2);
+      await run("export PR695_OTHER=second; printf '\\nFRESH:%s:%s:%s\\n' \"$$\" \"${PR695_TOKEN-unset}\" \"$PWD\"");
+      await waitOutput(`FRESH:[0-9]+:unset:${escapePattern(workspace)}`);
+      const secondPid = (await text()).match(/FRESH:(\d+):unset:/)[1];
+      assert.notEqual(secondPid, pid);
+
+      // The existing Explorer action should focus, not create another shell.
+      await hidePanel();
+      await showSidebar();
+      await page.getByRole("button", { name: "Open workspace terminal", exact: true }).click();
+      await ready();
+      assert.equal((await savedTerminals()).activeId, secondId);
+      assert.equal((await savedTerminals()).open, true);
+      assert.equal(created.size, 2);
+
+      await page.reload();
+      await ready();
+      const restored = await savedTerminals();
+      assert.deepEqual(restored.tabs, multipleTabs, "refresh keeps every same-cwd tab and its number");
+      assert.equal(restored.activeId, secondId);
+      assert.equal(created.size, 2, "multi-terminal refresh must only reconnect");
+      await run("printf '\\nSECOND_REFRESH:%s:%s\\n' \"$PR695_OTHER\" \"$$\"");
+      await waitOutput(`SECOND_REFRESH:second:${secondPid}`);
+      await page.getByRole("tab", { name: "Terminal: 1: workspace-a", exact: true }).click();
+      await ready();
+      await run("printf '\\nORIGINAL:%s:%s:%s\\n' \"$PR695_TOKEN\" \"$$\" \"$PWD\"");
+      await waitOutput(`ORIGINAL:alive:${pid}:${escapePattern(join(workspace, "nested"))}`);
+      await checkLayout();
+      await page.screenshot({ path: join(artifacts, `${viewport.width}-multiple.png`), fullPage: true });
 
       await page.getByRole("button", { name: "Restart terminal", exact: true }).click();
       await page.waitForFunction((oldId) => {
         const saved = JSON.parse(sessionStorage.getItem("pi-web:terminal-tabs"));
-        return saved.tabs.length === 1 && saved.tabs[0].id !== oldId;
+        return saved.tabs.length === 2 && saved.tabs[0].id !== oldId;
       }, id);
       await ready();
+      const afterRestart = await savedTerminals();
+      assert.equal(afterRestart.tabs[0].number, 1);
+      assert.deepEqual(afterRestart.tabs[1], multipleTabs[1], "restart must not touch the sibling");
       assert.equal((await fetch(`${base}/api/terminal/${id}`)).status, 404);
+      await run("printf '\\nRESTARTED:%s:%s\\n' \"${PR695_TOKEN-unset}\" \"$PWD\"");
+      await waitOutput(`RESTARTED:unset:${escapePattern(workspace)}`);
       await run("exit 7");
       await page.getByText("Process exited with code 7", { exact: true }).waitFor();
-      const currentId = await page.evaluate(() => JSON.parse(sessionStorage.getItem("pi-web:terminal-tabs")).tabs[0].id);
-      await page.getByRole("button", { name: "Terminate terminal workspace-a", exact: true }).click();
-      await page.locator(".terminal-panel").waitFor({ state: "detached" });
+      const currentId = afterRestart.tabs[0].id;
+      await page.getByRole("button", { name: "Terminate terminal 1: workspace-a", exact: true }).click();
+      await page.waitForFunction(() => document.querySelectorAll(".terminal-panel").length === 1);
       assert.equal((await fetch(`${base}/api/terminal/${currentId}`)).status, 404);
+      await ready();
+      assert.deepEqual((await savedTerminals()).tabs, [multipleTabs[1]], "closing a sibling must not renumber the survivor");
+      await run("printf '\\nSURVIVOR:%s:%s\\n' \"$PR695_OTHER\" \"$$\"");
+      await waitOutput(`SURVIVOR:second:${secondPid}`);
+      await page.getByRole("button", { name: "Terminate terminal 2: workspace-a", exact: true }).click();
+      await page.locator(".terminal-panel").waitFor({ state: "detached" });
+      assert.equal((await fetch(`${base}/api/terminal/${secondId}`)).status, 404);
 
       let releaseCreation;
       const creationResponse = new Promise((resolve) => { releaseCreation = resolve; });
@@ -164,7 +231,7 @@ try {
       await hidePanel();
       await showSidebar();
       await page.getByRole("button", { name: "Open workspace terminal", exact: true }).click();
-      await page.getByRole("button", { name: "Terminate terminal workspace-a", exact: true }).click();
+      await page.getByRole("button", { name: "Terminate terminal 1: workspace-a", exact: true }).click();
       releaseCreation();
       await page.locator(".terminal-panel").waitFor({ state: "detached" });
       await page.unroute("**/api/terminal");
@@ -185,19 +252,28 @@ try {
       assert.deepEqual(workspaceTabs.map((tab) => tab.cwd).sort(), [workspace, otherWorkspace].sort());
       const otherId = workspaceTabs.find((tab) => tab.cwd === otherWorkspace).id;
       assert.equal((await (await fetch(`${base}/api/terminal/${otherId}`)).json()).cwd, otherWorkspace);
-      await page.getByRole("tab", { name: "Terminal: workspace-a", exact: true }).click();
+      await page.getByRole("tab", { name: "Terminal: 1: workspace-a", exact: true }).click();
       await run("printf '\\nWORKSPACE:%s\\n' \"$PR695_WORKSPACE\"");
       await waitOutput("WORKSPACE:retained");
+      await page.getByRole("button", { name: "New terminal", exact: true }).click();
+      await ready();
+      const crossWorkspace = await savedTerminals();
+      const added = crossWorkspace.tabs.find((tab) => tab.id === crossWorkspace.activeId);
+      assert.equal(added.cwd, workspace, "New uses the terminal's original cwd, not the selected project's cwd");
+      assert.equal(added.number, 2);
+      assert.equal((await (await fetch(`${base}/api/terminal/${added.id}`)).json()).cwd, workspace);
+      await checkLayout();
       await page.screenshot({ path: join(artifacts, `${viewport.width}-workspaces.png`), fullPage: true });
-      for (const name of ["workspace-a", "workspace-b"]) {
+      for (const name of ["1: workspace-a", "2: workspace-a", "1: workspace-b"]) {
         await page.getByRole("button", { name: `Terminate terminal ${name}`, exact: true }).click();
       }
       await page.locator(".terminal-panel").waitFor({ state: "detached" });
       for (const terminalId of created) assert.equal((await fetch(`${base}/api/terminal/${terminalId}`)).status, 404);
       assert.deepEqual(errors, []);
-      console.log(`PASS ${viewport.width}: real shell, files, sessions, refresh, reconnect, restart, exit, close during creation, workspace isolation`);
+      console.log(`PASS ${viewport.width}: independent same-cwd shells, stable numbers, multi-tab refresh, sibling-safe restart/close, files, sessions, reconnect, exit, close during creation, workspace isolation`);
     } catch (error) {
       await page.screenshot({ path: join(artifacts, `failure-${viewport.width}.png`), fullPage: true });
+      console.error("Saved terminals:", await savedTerminals());
       console.error(await page.locator("body").innerText());
       throw error;
     } finally {

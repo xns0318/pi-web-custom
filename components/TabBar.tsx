@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getFileIcon } from "./FileIcons";
 import { useI18n } from "@/hooks/useI18n";
 import type { FileViewerDisplayMode, FileViewerState } from "@/lib/file-viewer-state";
@@ -28,9 +28,22 @@ interface Props {
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
   const { t } = useI18n();
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const list = listRef.current;
+    const active = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!list || !active) return;
+    const bounds = list.getBoundingClientRect();
+    const tab = active.getBoundingClientRect();
+    // Reveal new/selected tabs without scrolling the surrounding terminal or page.
+    if (tab.left < bounds.left) list.scrollLeft -= bounds.left - tab.left;
+    else if (tab.right > bounds.right) list.scrollLeft += tab.right - bounds.right;
+  }, [activeTabId, tabs.length]);
 
   return (
     <div
+      ref={listRef}
       role="tablist"
       style={{
         display: "flex",

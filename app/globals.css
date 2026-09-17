@@ -340,6 +340,7 @@ html.dark .web-login-error {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   min-width: 0;
   padding: 0 10px 0 13px;
   border-bottom: 1px solid #2f3540;
@@ -373,6 +374,13 @@ html.dark .web-login-error {
 .terminal-status-dot.is-ready { background: #4ade80; }
 .terminal-status-dot.is-exited,
 .terminal-status-dot.is-error { background: #f87171; }
+
+.terminal-panel-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+}
 
 .terminal-panel-header button {
   display: inline-flex;

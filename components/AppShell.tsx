@@ -21,7 +21,7 @@ import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { UsagePanel } from "./UsagePanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import { TerminalPanel } from "./TerminalPanel";
-import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
+import { newTerminalTab, nextTerminalNumber, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile, useIsNarrowMobile } from "@/hooks/useIsMobile";
@@ -454,7 +454,7 @@ export function AppShell() {
   const [terminalsRestored, setTerminalsRestored] = useState(false);
   const panelTabs: Tab[] = [...fileTabs.map((tab) => ({ ...tab, dirty: draftDirty(editorStore.get(tab.filePath)), closing: editorStore.get(tab.filePath)?.saving })), ...terminalTabs.map((tab) => ({
     id: tab.id,
-    label: getFileName(tab.cwd) || tab.cwd,
+    label: translate("terminal.numberedName", { name: getFileName(tab.cwd) || tab.cwd, number: tab.number }),
     filePath: tab.cwd,
     kind: "terminal" as const,
     closing: Boolean(tab.closing),
@@ -484,7 +484,7 @@ export function AppShell() {
     if (!terminalsRestored) return;
     try {
       window.sessionStorage.setItem(TERMINAL_TABS_KEY, JSON.stringify({
-        tabs: terminalTabs.map(({ id, cwd }) => ({ id, cwd })),
+        tabs: terminalTabs.map(({ id, cwd, number }) => ({ id, cwd, number })),
         activeId: activeFileTabId,
         open: rightPanelOpen,
       }));
@@ -712,8 +712,10 @@ export function AppShell() {
     }
     activeNewSessionDraftKeyRef.current = null;
     // Adopt an explicitly selected session before the sidebar reports its cwd.
+    // Initial URL restoration can race terminal hydration; it is not a project
+    // switch and must not clear the independently restored active terminal.
     const projectKey = workspaceKeyOf(session);
-    if (activeProjectKeyRef.current !== projectKey) {
+    if (!isRestore && activeProjectKeyRef.current !== projectKey) {
       editorStore.clearClean();
       setFileTabs((tabs) => tabs.filter((tab) => editorStore.get(tab.filePath)));
       if (!activeFileTabId || (activeFileTabId.startsWith("file:") && !editorStore.get(activeFileTabId.slice(5)))) {
@@ -1021,17 +1023,29 @@ export function AppShell() {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
   }, [handleOpenFile, selectedSession?.id]);
 
-  const handleOpenTerminal = useCallback((cwd: string) => {
-    const existing = terminalTabs.find((tab) => tab.cwd === cwd);
-    const tab = existing ?? newTerminalTab(cwd);
-    if (!existing) setTerminalTabs((tabs) => [...tabs, tab]);
+  const handleNewTerminal = useCallback((cwd: string) => {
+    // Generate identity outside the updater; allocate a label against the latest tabs.
+    const tab = newTerminalTab(cwd);
+    setTerminalTabs((tabs) => [...tabs, { ...tab, number: nextTerminalNumber(tabs, cwd) }]);
     setActiveFileTabId(tab.id);
     setRightPanelOpen(true);
     if (isMobile) setSidebarOpen(false);
-  }, [terminalTabs, isMobile]);
+  }, [isMobile]);
+
+  const handleOpenTerminal = useCallback((cwd: string) => {
+    const candidates = terminalTabs.filter((tab) => tab.cwd === cwd && !tab.closing);
+    const existing = candidates.find((tab) => tab.id === activeFileTabId) ?? candidates.at(-1);
+    if (!existing) {
+      handleNewTerminal(cwd);
+      return;
+    }
+    setActiveFileTabId(existing.id);
+    setRightPanelOpen(true);
+    if (isMobile) setSidebarOpen(false);
+  }, [terminalTabs, activeFileTabId, handleNewTerminal, isMobile]);
 
   const handleTerminalClosed = (tab: TerminalTab) => {
-    const replacement = tab.closing === "restart" ? newTerminalTab(tab.cwd) : null;
+    const replacement = tab.closing === "restart" ? newTerminalTab(tab.cwd, tab.number) : null;
     const remaining = terminalTabs.filter((item) => item.id !== tab.id);
     setTerminalTabs((tabs) => tabs.flatMap((item) => item.id !== tab.id ? [item] : replacement ? [replacement] : []));
     setActiveFileTabId((current) => current !== tab.id ? current : replacement?.id ?? remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? null);
@@ -2510,6 +2524,7 @@ export function AppShell() {
               <TerminalPanel
                 tab={tab}
                 active={rightPanelOpen && tab.id === activeFileTabId}
+                onNew={() => handleNewTerminal(tab.cwd)}
                 onRestart={() => setTerminalTabs((tabs) => tabs.map((item) => item.id === tab.id ? { ...item, closing: "restart" } : item))}
                 onClosed={() => handleTerminalClosed(tab)}
                 onCloseError={() => setTerminalTabs((tabs) => tabs.map((item) => item.id === tab.id ? { ...item, closing: undefined } : item))}

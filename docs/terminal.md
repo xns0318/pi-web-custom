@@ -1,18 +1,34 @@
 # Workspace Terminals
 
 The Explorer terminal action opens or focuses a terminal for its selected cwd
-in the right panel's existing tab bar. Each terminal tab keeps the cwd it was
-created with. Files still mount only their active viewer; terminal panels stay
-mounted behind inactive tabs, hidden panels, and session or project switches.
+in the right panel's existing tab bar. It keeps the active matching tab, or focuses
+the last matching tab when another workspace or file is active.
+
+Use **+ New terminal** in a terminal's header to create an additional independent
+shell in that tab's original cwd, even when another project is selected in the
+Explorer. This never replaces or reconnects to the existing shell. Multiple tabs
+for the same directory have separate processes, output, working directories and
+shell variables. They still share the host filesystem, login-shell configuration
+and the server's baseline environment; this is not container isolation.
+
+Tabs have stable per-directory numbers (for example, `1: repo` and `2: repo`).
+Closing a tab does not renumber its siblings; its number may be reused by a new
+tab. Restart replaces only that tab's process and keeps its number.
+
+Each terminal tab keeps the cwd it was created with. Files still mount only their
+active viewer; terminal panels stay mounted behind inactive tabs, hidden panels,
+and session or project switches.
 
 ## Lifecycle
 
 - Each new tab generates a random terminal ID before creation. Creation with
   the same ID and cwd is idempotent, including React Strict Mode's repeated
   effects. An existing ID cannot be reused for another cwd.
-- `sessionStorage` retains terminal IDs, cwds, and the active terminal layout
-  across refresh. Restored tabs first check the existing server instance and
-  never silently start replacement processes after expiry or server restart.
+- `sessionStorage` retains terminal IDs, cwds, numbers, and the active terminal
+  layout across refresh. Tabs are deduplicated by ID, never by cwd. Older saved
+  tabs without numbers are assigned labels without changing their process IDs.
+  Restored tabs first check the existing server instance and never silently start
+  replacement processes after expiry or server restart.
 - A new PTY gets a 120-second connection lease. Subscribing cancels expiry;
   the last subscriber leaving starts a new 120-second grace period. This also
   collects creations that never establish their initial connection.

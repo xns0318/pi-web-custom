@@ -55,6 +55,38 @@ test("workspace restoration remains inside the cross-project branch", () => {
   );
 });
 
+test("initial session restoration cannot clear independently restored terminal layout", () => {
+  const callback = callbackBody("handleSelectSession", "handleNewSession");
+  const calls = [];
+  const context = vm.createContext({
+    useCallback: (callback) => callback,
+    workspaceKeyOf: (session) => session.cwd,
+    invalidateWorkspaceRestore() {},
+    activeNewSessionDraftKeyRef: { current: null },
+    activeProjectKeyRef: { current: null },
+    branchLeafChangeFnRef: { current: null },
+    suppressCwdBumpRef: { current: false },
+    // A callback captured before terminal hydration still sees no active tab.
+    activeFileTabId: null,
+    activeCwd: null,
+    newSessionCwd: null,
+    selectedSession: null,
+    editorStore: { clearClean() { calls.push("clearClean"); } },
+    isMobile: false,
+    router: { replace() { assert.fail("initial restore must not navigate"); } },
+  });
+  for (const [setter] of callback.matchAll(/\bset[A-Z]\w*(?=\()/g)) {
+    context[setter] = () => calls.push(setter);
+  }
+  vm.runInContext(stripTypeScriptTypes(`${callback}\nglobalThis.restore = handleSelectSession;`), context);
+  context.restore({ id: "restored-session", cwd: "/repo" }, true);
+  for (const name of ["clearClean", "setFileTabs", "setActiveFileTabId", "setRightPanelOpen"]) {
+    assert.ok(!calls.includes(name), `${name} must not erase a restored terminal layout`);
+  }
+  assert.equal(context.activeProjectKeyRef.current, "/repo");
+  assert.equal(context.suppressCwdBumpRef.current, true);
+});
+
 test("New restores the draft after session navigation and workspace auto-restore", async (t) => {
   const callbacks = [
     callbackBody("restoreWorkspaceContext", "handleCwdChange"),
