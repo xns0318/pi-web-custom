@@ -41,6 +41,7 @@ import {
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { resolveShellTools } from "./powershell-settings";
+import { installSearchToolPolicy } from "./search-tool-policy";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import {
   appendSessionToolSelection,
@@ -111,6 +112,8 @@ type ExtensionCommandContextActionsLike = {
 };
 
 type AgentSessionWrapperOptions = {
+  // Undefined for profile-controlled subagents, which do not use Web presets.
+  toolSelection?: string[];
   exactSystemPrompt?: () => string;
   chatOnly?: boolean;
   onAgentRunComplete?: AgentRunCompleteListener;
@@ -235,6 +238,7 @@ export class AgentSessionWrapper {
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
   private readonly exactSystemPrompt?: () => string;
+  private readonly searchToolPolicy?: ReturnType<typeof installSearchToolPolicy>;
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly suppressCompletionNotifications: boolean;
@@ -251,6 +255,9 @@ export class AgentSessionWrapper {
     options: AgentSessionWrapperOptions = {},
   ) {
     this.exactSystemPrompt = options.exactSystemPrompt;
+    this.searchToolPolicy = options.toolSelection !== undefined
+      ? installSearchToolPolicy(this.inner, options.toolSelection)
+      : undefined;
     this.chatOnly = options.chatOnly ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
@@ -377,6 +384,7 @@ export class AgentSessionWrapper {
         this.inner.extensionRunner.setUIContext?.(uiContext, "rpc");
       }
       this.extensionsBound = true;
+      this.searchToolPolicy?.sync();
       this.applyExactSystemPrompt();
       console.log(`[pi-web] session_start dispatched to extensions for session ${this.inner.sessionId}`);
     })().catch((err) => {
@@ -437,6 +445,7 @@ export class AgentSessionWrapper {
   }
 
   setActiveToolSelection(toolNames: string[]): void {
+    this.searchToolPolicy?.setSelection(toolNames);
     this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
     this.applyExactSystemPrompt();
   }
@@ -1036,6 +1045,7 @@ export class AgentSessionWrapper {
       try {
         this.inner.dispose();
       } finally {
+        this.searchToolPolicy?.dispose();
         this.onDestroyCallback?.();
       }
     };
@@ -1636,6 +1646,7 @@ export class AgentSessionWrapper {
       },
       switchSession: async () => ({ cancelled: true }),
       reload: async () => {
+        const activeToolNames = this.inner.getActiveToolNames();
         this.extensionStatuses.clear();
         this.resetExtensionWidgetsForReload();
         this.syncProjectTrust();
@@ -1644,6 +1655,7 @@ export class AgentSessionWrapper {
             this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
           },
         });
+        this.setActiveToolSelection(activeToolNames);
         this.applyExactSystemPrompt();
       },
     };
@@ -2113,13 +2125,6 @@ export async function startRpcSession(
     );
     if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
 
-    // If specific tool names were requested (non-empty), set the active tools to the
-    // requested builtin coding tools PLUS all extension/package tools, so installed
-    // extensions stay usable in Pi Web just like in the `pi` CLI.
-    if (!subagentResources && !chatOnly) {
-      inner.setActiveToolsByName(withExtensionTools(inner, selectedToolNames ?? inner.getActiveToolNames()));
-    }
-
     const exactSystemPrompt = subagentResources?.exactSystemPrompt !== undefined
       ? () => subagentResources.exactSystemPrompt!
       : chatOnly
@@ -2128,6 +2133,7 @@ export async function startRpcSession(
           : () => contextFilesSystemPrompt(inner.resourceLoader.getAgentsFiles().agentsFiles)
         : undefined;
     const wrapper = new AgentSessionWrapper(inner, {
+      ...(!subagentResources ? { toolSelection: selectedToolNames ?? inner.getActiveToolNames() } : {}),
       exactSystemPrompt,
       chatOnly,
       onAgentRunComplete: (completedSessionId) => {
@@ -2137,6 +2143,11 @@ export async function startRpcSession(
       },
       suppressCompletionNotifications: Boolean(subagentResources),
     });
+    // Add installed extensions only after the normal-session search policy is
+    // installed. Default/Read-only retain other extensions; search requires Full.
+    if (!subagentResources && !chatOnly) {
+      wrapper.setActiveToolSelection(selectedToolNames ?? inner.getActiveToolNames());
+    }
     const realSessionId = inner.sessionId as string;
     registerRpcWrapper(wrapper);
 

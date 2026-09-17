@@ -8,6 +8,7 @@ import { createJiti } from "jiti";
 const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const jiti = createJiti(import.meta.url);
 const draftStore = await jiti.import("../lib/draft-store.ts");
+const { createFileEditorStore } = await jiti.import("../lib/file-editor-state.ts");
 
 function callbackBody(name, nextName) {
   const start = source.indexOf(`const ${name} = useCallback`);
@@ -96,6 +97,8 @@ test("New restores the draft after session navigation and workspace auto-restore
         isMobile: false,
         activeCwd: cwd,
         activeFileTabId: null,
+        fileTabs: [],
+        editorStore: createFileEditorStore(),
         newSessionCwd: cwd,
         newSessionDraftId: "initial",
         selectedSession: null,

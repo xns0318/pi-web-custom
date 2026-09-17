@@ -22,6 +22,7 @@ export interface ContextUsage {
 export interface ModelLike {
   id: string;
   provider: string;
+  api?: string;
 }
 
 export interface ToolInfo {
@@ -182,7 +183,7 @@ export interface AgentSessionLike {
   }): Promise<{ output: string; exitCode?: number; cancelled?: boolean; truncated?: boolean; fullOutputPath?: string }>;
   abortBash(): void;
   readonly isBashRunning: boolean;
-  setModel(model: ModelLike): Promise<void>;
+  setModel(model: ModelLike, options?: { persist?: boolean }): Promise<void>;
   navigateTree(targetId: string, options?: { summarize?: boolean }): Promise<NavigateTreeResult>;
   setThinkingLevel(level: string): void;
   compact(customInstructions?: string): Promise<unknown>;

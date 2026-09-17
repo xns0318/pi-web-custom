@@ -12,11 +12,12 @@ function fileContentBlock() {
   return source.slice(start, end);
 }
 
-test("only the active file tab mounts a FileViewer", () => {
+test("only the active file tab mounts an EditableFileViewer", () => {
   const block = fileContentBlock();
   assert.match(block, /activeFileTab\?\.filePath \? \(/);
   assert.doesNotMatch(block, /fileTabs\.map\(/);
-  assert.equal(block.match(/<FileViewer/g)?.length, 1);
+  assert.equal(block.match(/<EditableFileViewer/g)?.length, 1);
+  assert.match(block, /store=\{editorStore\}/);
 });
 
 test("the active viewer restores tab state and saves it with a revision", () => {

@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const serverMode = process.env.TERMINAL_E2E_SERVER_MODE || "dev";
+assert.ok(["dev", "start"].includes(serverMode), "Expected dev or start server mode");
 assert.ok(!existsSync(join(root, ".next/dev/lock")), "Run in a checkout without an active dev server");
 const artifacts = mkdtempSync(join(tmpdir(), "pi-web-terminal-e2e-"));
 console.log(`Artifacts: ${artifacts}`);
@@ -40,7 +42,7 @@ const port = probe.address().port;
 await new Promise((resolve) => probe.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const log = createWriteStream(join(artifacts, "server.log"));
-const server = spawn(process.execPath, [join(root, "node_modules/next/dist/bin/next"), "dev", "-H", "127.0.0.1", "-p", String(port)], {
+const server = spawn(process.execPath, [join(root, "node_modules/next/dist/bin/next"), serverMode, "-H", "127.0.0.1", "-p", String(port)], {
   cwd: root,
   env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_WEB_PASSWORD: "", NEXT_TELEMETRY_DISABLED: "1", HISTFILE: process.platform === "win32" ? "NUL" : "/dev/null", BASH_SILENCE_DEPRECATION_WARNING: "1", SHELL: process.platform === "win32" ? process.env.SHELL : "/bin/bash" },
   stdio: ["ignore", "pipe", "pipe"],
@@ -56,7 +58,8 @@ try {
     assert.ok(i < 120 && server.exitCode === null, "Server did not become ready");
     await delay(500);
   }
-  browser = await chromium.launch();
+  browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+    ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {});
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     const context = await browser.newContext({ viewport, locale: "en-US" });
     const page = await context.newPage();

@@ -1,19 +1,24 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
-import { FileViewer } from "./FileViewer";
+import { EditableFileViewer } from "./EditableFileViewer";
+import { FileOperationDialog } from "./FileOperationDialog";
+import { createFileEditorStore, draftDirty, fileInWorkspace } from "@/lib/file-editor-state";
+import type { FileAction, FileMutation } from "@/lib/workspace-file-types";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
+import { applyFileMutation } from "@/lib/file-tab-mutations";
 import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
+import { UsagePanel } from "./UsagePanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
@@ -312,7 +317,7 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "usage" | "session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -328,7 +333,7 @@ export function AppShell() {
   }, [hasSubagentSessions]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session",
+    panel: "agents" | "branches" | "system" | "tools" | "usage" | "session",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -417,6 +422,11 @@ export function AppShell() {
     if (!activeTopPanel || !topBarRef.current) return;
     const update = () => {
       const topBarRect = topBarRef.current!.getBoundingClientRect();
+      if (activeTopPanel === "usage") {
+        const width = Math.min(820, topBarRect.width);
+        setTopPanelPos({ top: topBarRect.bottom, left: topBarRect.right - width, width });
+        return;
+      }
       if (activeTopPanel === "agents") {
         setTopPanelPos({
           top: topBarRect.bottom,
@@ -433,18 +443,30 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel, isMobile]);
 
-  // Files unmount when inactive; workspace terminals stay mounted until closed.
+  // Inactive viewers unmount; text/selection/undo drafts remain in page memory.
+  const [editorStore] = useState(createFileEditorStore);
+  useSyncExternalStore(editorStore.subscribe, editorStore.status, () => 0);
+  const [fileAction, setFileAction] = useState<FileAction | null>(null);
+  const [editingPath, setEditingPath] = useState<string | null>(null);
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [terminalsRestored, setTerminalsRestored] = useState(false);
-  const panelTabs: Tab[] = [...fileTabs, ...terminalTabs.map((tab) => ({
+  const panelTabs: Tab[] = [...fileTabs.map((tab) => ({ ...tab, dirty: draftDirty(editorStore.get(tab.filePath)), closing: editorStore.get(tab.filePath)?.saving })), ...terminalTabs.map((tab) => ({
     id: tab.id,
     label: getFileName(tab.cwd) || tab.cwd,
     filePath: tab.cwd,
     kind: "terminal" as const,
     closing: Boolean(tab.closing),
   }))];
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (editorStore.hasPending()) { event.preventDefault(); event.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [editorStore]);
 
   useEffect(() => {
     try {
@@ -665,10 +687,11 @@ export function AppShell() {
     setSystemInfoLoading(false);
     setActiveTopPanel(null);
     if (currentProject !== newProject) {
-      // File tabs are keyed by absolute path, so tabs opened in the previous
-      // project must not linger. Same-project worktree switches keep them.
-      setFileTabs([]);
-      if (!activeFileTabId || activeFileTabId.startsWith("file:")) {
+      // Preserve unsaved/pending file tabs across project switches. They become
+      // read-only outside their workspace instead of silently losing drafts.
+      editorStore.clearClean();
+      setFileTabs((tabs) => tabs.filter((tab) => editorStore.get(tab.filePath)));
+      if (!activeFileTabId || (activeFileTabId.startsWith("file:") && !editorStore.get(activeFileTabId.slice(5)))) {
         setActiveFileTabId(null);
         setRightPanelOpen(false);
       }
@@ -677,7 +700,7 @@ export function AppShell() {
       restoreWorkspaceContext(newProject, cwd);
     }
     router.replace(typeof window !== "undefined" ? window.location.pathname : "/", { scroll: false });
-  }, [activeCwd, activeFileTabId, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
+  }, [activeCwd, activeFileTabId, editorStore, invalidateWorkspaceRestore, newSessionCwd, router, selectedSession, restoreWorkspaceContext]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false, entryId?: string, blockIndex?: number) => {
     setSearchTarget(entryId ? { sessionId: session.id, entryId, blockIndex } : null);
@@ -691,8 +714,9 @@ export function AppShell() {
     // Adopt an explicitly selected session before the sidebar reports its cwd.
     const projectKey = workspaceKeyOf(session);
     if (activeProjectKeyRef.current !== projectKey) {
-      setFileTabs([]);
-      if (!activeFileTabId || activeFileTabId.startsWith("file:")) {
+      editorStore.clearClean();
+      setFileTabs((tabs) => tabs.filter((tab) => editorStore.get(tab.filePath)));
+      if (!activeFileTabId || (activeFileTabId.startsWith("file:") && !editorStore.get(activeFileTabId.slice(5)))) {
         setActiveFileTabId(null);
         setRightPanelOpen(false);
       }
@@ -733,7 +757,7 @@ export function AppShell() {
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
-  }, [activeCwd, activeFileTabId, invalidateWorkspaceRestore, router, isMobile, newSessionCwd, selectedSession]);
+  }, [activeCwd, activeFileTabId, editorStore, invalidateWorkspaceRestore, router, isMobile, newSessionCwd, selectedSession]);
 
   const handleNewSession = useCallback((sessionId: string, cwd: string) => {
     invalidateWorkspaceRestore();
@@ -972,11 +996,14 @@ export function AppShell() {
   const handleOpenFile = useCallback((
     filePath: string,
     fileName: string,
-    options?: { sourceSessionId?: string | null; modeHint?: "diff" },
+    options?: { sourceSessionId?: string | null; modeHint?: "diff"; edit?: boolean },
   ) => {
     const sourceSessionId = options?.sourceSessionId;
     const modeHint = options?.modeHint;
     const tabId = `file:${filePath}`;
+    if (options?.edit) setEditingPath(filePath);
+    const draft = editorStore.get(filePath);
+    if (modeHint === "diff" && draft) editorStore.set(filePath, { ...draft, viewOnly: true });
     setFileTabs((prev) => openFileTab(prev, {
       fileName,
       filePath,
@@ -988,7 +1015,7 @@ export function AppShell() {
     setRightPanelOpen(true);
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
-  }, [isMobile]);
+  }, [isMobile, editorStore]);
 
   const handleOpenLinkedFile = useCallback((filePath: string) => {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
@@ -1016,6 +1043,11 @@ export function AppShell() {
       setTerminalTabs((tabs) => tabs.map((tab) => tab.id === tabId && !tab.closing ? { ...tab, closing: "close" } : tab));
       return;
     }
+    const path = fileTabs.find((tab) => tab.id === tabId)?.filePath;
+    const draft = path ? editorStore.get(path) : undefined;
+    if (draft?.saving) return;
+    if (draftDirty(draft) && !window.confirm(translate("workspace.discard"))) return;
+    if (path) editorStore.remove(path);
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
       if (next.length === 0 && terminalTabs.length === 0) setRightPanelOpen(false);
@@ -1026,7 +1058,26 @@ export function AppShell() {
       const remaining = fileTabs.filter((t) => t.id !== tabId);
       return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? null;
     });
-  }, [fileTabs, terminalTabs]);
+  }, [fileTabs, terminalTabs, editorStore, translate]);
+
+  const handleFileMutation = (result: FileMutation) => {
+    if (result.operation === "create-file") {
+      if (activeCwd && fileInWorkspace(result.path, activeCwd)) handleOpenFile(result.path, getFileName(result.path), { edit: true });
+      return;
+    }
+    if (result.operation === "rename" && result.newPath) {
+      editorStore.removeTree(result.newPath);
+      editorStore.rename(result.path, result.newPath);
+      setActiveFileTabId((current) => current?.startsWith("file:") && fileInWorkspace(current.slice(5), result.path)
+        ? `file:${result.newPath}${current.slice(5 + result.path.length)}` : current);
+    } else if (result.operation === "delete") {
+      editorStore.removeTree(result.path);
+      const remaining = applyFileMutation(fileTabs, result);
+      setActiveFileTabId((current) => current?.startsWith("file:") && fileInWorkspace(current.slice(5), result.path)
+        ? remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? null : current);
+    }
+    setFileTabs((tabs) => applyFileMutation(tabs, result));
+  };
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -1124,6 +1175,7 @@ export function AppShell() {
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
+        onFileAction={setFileAction}
         onOpenTerminal={handleOpenTerminal}
         explorerRefreshKey={explorerRefreshKey}
         onExplorerRefresh={handleExplorerRefresh}
@@ -1237,10 +1289,38 @@ export function AppShell() {
     );
   };
 
+  const closeUsagePanel = useCallback(() => setActiveTopPanel(null), []);
+  const renderUsageButton = (mobile: boolean) => (
+    <button
+      type="button"
+      onClick={() => toggleTopPanel("usage", mobile)}
+      title={translate("usage.title")}
+      aria-label={translate("usage.title")}
+      aria-expanded={activeTopPanel === "usage"}
+      aria-haspopup="dialog"
+      data-mobile-toolbar-action={mobile ? "usage" : undefined}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
+        height: "100%", padding: mobile ? 0 : "0 12px",
+        background: activeTopPanel === "usage" ? "var(--bg-selected)" : "none",
+        border: "none", borderRight: "1px solid var(--border)",
+        borderTop: activeTopPanel === "usage" ? "2px solid var(--accent)" : "2px solid transparent",
+        color: activeTopPanel === "usage" ? "var(--text)" : "var(--text-muted)",
+        cursor: "pointer", flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 3v18h18M7 16v-5M12 16V6M17 16V9" />
+      </svg>
+      {!mobile && <span>{translate("usage.label")}</span>}
+    </button>
+  );
+
   const renderChatToolbarActions = (mobile: boolean) => {
-    if (!mobile && !showChat) return null;
+    if (!mobile && !showChat) return renderUsageButton(false);
     return (
-      <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+      <div style={{ display: "flex", alignItems: "stretch", height: "100%", maxWidth: mobile ? "100%" : undefined, overflowX: mobile ? "auto" : undefined }}>
         <button
           type="button"
           onClick={() => {
@@ -1529,6 +1609,7 @@ export function AppShell() {
           </svg>
           {!mobile && <span>{translate("tools.label")}</span>}
         </button>
+        {renderUsageButton(mobile)}
       </div>
     );
   };
@@ -1733,6 +1814,7 @@ export function AppShell() {
 
   return (
     <>
+    {fileAction && <FileOperationDialog key={`${fileAction.workspace}:${fileAction.path}:${fileAction.operation}`} action={fileAction} store={editorStore} onClose={() => setFileAction(null)} onCommitted={handleFileMutation} onRefresh={handleExplorerRefresh} />}
     <style>{`
       @keyframes session-info-pop {
         0% {
@@ -2026,6 +2108,7 @@ export function AppShell() {
                   translate={translate}
                 />
               )}
+              {activeTopPanel === "usage" && <UsagePanel onClose={closeUsagePanel} />}
               {activeTopPanel === "session" && (
                 <div className="session-info-popover" style={{
                   background: "var(--bg-panel)",
@@ -2391,8 +2474,12 @@ export function AppShell() {
         {/* Only the active viewer is mounted. Lightweight per-tab state is restored on activation. */}
         <div style={{ flex: 1, minHeight: 0, overflow: "hidden", paddingBottom: "env(safe-area-inset-bottom)" }}>
           {activeFileTab?.filePath ? (
-            <FileViewer
+            <EditableFileViewer
               key={`${activeFileTab.id}:${activeFileTab.viewerRevision ?? 0}`}
+              store={editorStore}
+              requestEdit={editingPath === activeFileTab.filePath}
+              onEditRequestHandled={() => setEditingPath(null)}
+              onSaved={handleExplorerRefresh}
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}
               sourceSessionId={activeFileTab.sourceSessionId}

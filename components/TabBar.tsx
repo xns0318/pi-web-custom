@@ -11,6 +11,7 @@ export interface Tab {
   filePath: string;
   kind?: "terminal";
   closing?: boolean;
+  dirty?: boolean;
   sourceSessionId?: string | null;
   initialDisplayMode?: FileViewerDisplayMode;
   viewerState?: FileViewerState;
@@ -48,6 +49,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             role="tab"
             aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.label}
             aria-selected={isActive}
+            data-dirty={tab.dirty || undefined}
             tabIndex={isActive || (!activeTabId && tabs[0].id === tab.id) ? 0 : -1}
             onKeyDown={(event) => {
               if (event.target !== event.currentTarget) return;
@@ -111,6 +113,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             >
               {tab.label}
             </span>
+            {tab.dirty && <span title={t("workspace.unsaved")} aria-label={t("workspace.unsaved")} style={{ color: "var(--accent)" }}>●</span>}
             <button
               disabled={tab.closing}
               onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}

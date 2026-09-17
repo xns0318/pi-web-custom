@@ -2,6 +2,8 @@
 
 import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
+import { FileActionsMenu } from "./FileActionsMenu";
+import type { FileAction } from "@/lib/workspace-file-types";
 import {
   encodeFilePathForApi,
   getFileDirectory,
@@ -35,6 +37,7 @@ interface FileNode {
 interface Props {
   cwd: string;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+  onFileAction?: (action: FileAction) => void;
   refreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
@@ -218,6 +221,7 @@ function TreeNode({
   depth,
   cwd,
   onOpenFile,
+  onFileAction,
   onAtMention,
   expandedPaths,
   onToggleExpanded,
@@ -231,6 +235,7 @@ function TreeNode({
   depth: number;
   cwd: string;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+  onFileAction?: (action: FileAction) => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
@@ -247,6 +252,7 @@ function TreeNode({
   const containsGitChanges = node.isDir && (
     gitStatus !== undefined || changedDirectoryPaths.has(normalizedPath)
   );
+  const [contextPoint, setContextPoint] = useState<{ x: number; y: number } | null>(null);
   const [children, setChildren] = useState<FileNode[]>(node.children ?? []);
   const [loaded, setLoaded] = useState(node.loaded ?? false);
   const [loading, setLoading] = useState(false);
@@ -288,6 +294,10 @@ function TreeNode({
     <div>
       <div
         onClick={handleClick}
+        data-file-path={node.fullPath}
+        onContextMenu={(event) => {
+          if (onFileAction) { event.preventDefault(); event.stopPropagation(); setContextPoint({ x: event.clientX, y: event.clientY }); }
+        }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -296,7 +306,7 @@ function TreeNode({
           alignItems: "center",
           gap: 4,
           paddingLeft: 8 + depth * 14,
-          paddingRight: 8,
+          paddingRight: onFileAction ? 36 : 8,
           height: 24,
           cursor: "pointer",
           background: hovered ? "var(--bg-hover)" : "transparent",
@@ -372,7 +382,7 @@ function TreeNode({
             title={t("files.insertPath")}
             style={{
               position: "absolute",
-              right: !node.isDir ? 28 : 4,
+              right: (!node.isDir ? 28 : 4) + (onFileAction ? 26 : 0),
               top: "50%",
               transform: "translateY(-50%)",
               display: "flex",
@@ -403,7 +413,7 @@ function TreeNode({
             title={t("files.download")}
             style={{
               position: "absolute",
-              right: 4,
+              right: onFileAction ? 30 : 4,
               top: "50%",
               transform: "translateY(-50%)",
               display: "flex",
@@ -430,6 +440,10 @@ function TreeNode({
             </svg>
           </a>
         )}
+        {onFileAction && <div style={{ position: "absolute", right: 4, top: 1 }}>
+          <FileActionsMenu workspace={cwd} path={node.fullPath} directory={node.isDir} onAction={onFileAction}
+            onEdit={() => onOpenFile(node.fullPath, node.name, { edit: true })} contextPoint={contextPoint} onDismiss={() => setContextPoint(null)} />
+        </div>}
       </div>
       {node.isDir && open && (
         <div>
@@ -440,6 +454,7 @@ function TreeNode({
               depth={depth + 1}
               cwd={cwd}
               onOpenFile={onOpenFile}
+              onFileAction={onFileAction}
               onAtMention={onAtMention}
               expandedPaths={expandedPaths}
               onToggleExpanded={onToggleExpanded}
@@ -461,7 +476,7 @@ function TreeNode({
   );
 }
 
-type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "diff" };
+type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "diff"; edit?: boolean };
 
 type OpenFileHandler = (filePath: string, fileName: string, options?: OpenFileOptions) => void;
 
@@ -469,11 +484,13 @@ function ChangeRow({
   status,
   cwd,
   onOpenFile,
+  onFileAction,
   t,
 }: {
   status: GitFileStatus;
   cwd: string;
   onOpenFile: OpenFileHandler;
+  onFileAction?: (action: FileAction) => void;
   t: Translate;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -481,6 +498,7 @@ function ChangeRow({
   const rel = getRelativeFilePath(status.filePath, cwd);
   return (
     <div
+      data-git-file-path={status.filePath}
       onClick={() => onOpenFile(status.filePath, name, { modeHint: "diff" })}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -514,6 +532,7 @@ function ChangeRow({
       >
         {rel}
       </span>
+      {onFileAction && status.status !== "deleted" && <FileActionsMenu workspace={cwd} path={status.filePath} directory={false} onAction={onFileAction} onEdit={() => onOpenFile(status.filePath, name, { edit: true })} />}
     </div>
   );
 }
@@ -521,6 +540,7 @@ function ChangeRow({
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
   onOpenFile,
+  onFileAction,
   refreshKey,
   onAtMention,
   onAtMentions,
@@ -582,7 +602,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         .finally(() => { if (!controller.signal.aborted) setSearchLoading(false); });
     }, 150);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [cwd, fileSearchOpen, searchQuery]);
+  }, [cwd, fileSearchOpen, searchQuery, refreshToken]);
 
   // Focus the search input whenever the search panel opens.
   useEffect(() => {
@@ -809,6 +829,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   return (
     <div style={{ minHeight: "100%" }}>
+      {onFileAction && <div style={{ padding: "4px 8px", display: "flex", justifyContent: "flex-end" }}><FileActionsMenu workspace={cwd} path={cwd} directory root onAction={onFileAction} /></div>}
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
@@ -973,6 +994,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                     depth={0}
                     cwd={cwd}
                     onOpenFile={onOpenFile}
+                    onFileAction={onFileAction}
                     onAtMention={onAtMention}
                     expandedPaths={searchExpanded}
                     onToggleExpanded={(fullPath, open) => {
@@ -1012,7 +1034,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{gitLineStats.deletions}</span>
           </div>
           {gitFiles.map((status) => (
-            <ChangeRow key={status.filePath} status={status} cwd={cwd} onOpenFile={onOpenFile} t={t} />
+            <ChangeRow key={status.filePath} status={status} cwd={cwd} onOpenFile={onOpenFile} onFileAction={onFileAction} t={t} />
           ))}
         </div>
       )}
@@ -1031,6 +1053,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 depth={0}
                 cwd={cwd}
                 onOpenFile={onOpenFile}
+                onFileAction={onFileAction}
                 onAtMention={onAtMention}
                 expandedPaths={expandedPaths}
                 onToggleExpanded={handleToggleExpanded}

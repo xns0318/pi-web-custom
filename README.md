@@ -1,6 +1,47 @@
-# Pi Web
+# Pi Web Custom
 
 [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+
+> An independently maintained personal customization of
+> [agegr/pi-web](https://github.com/agegr/pi-web), based on its official **v0.9.1** release.
+> Upstream development history, copyright notices and the MIT license are retained.
+> This is not an official upstream release; upstream changes are adopted selectively.
+
+## Custom additions
+
+- [Token usage dashboard](./docs/token-usage.md): historical totals, per-directory breakdowns,
+  fork deduplication and server-side background refresh.
+- [Workspace editing and file management](./docs/workspace-files.md): explicit saves,
+  retained drafts, conflict checks and file/folder creation, rename and deletion.
+- [Full-only search policy](./docs/adr/0004-full-only-search-tools.md): search tools in
+  ordinary Web sessions are enabled only by the Full preset; profile-controlled
+  subagents retain their separate resource policy.
+
+See the [v0.9.1 integration notes](./docs/upgrades/v0.9.1-local.md) for scope, tests and known limitations.
+
+## Run this custom version
+
+Use Node.js 22.19.0 or newer. Build in a fresh checkout, never in a directory with an active dev server:
+
+```bash
+git clone https://github.com/xns0318/pi-web-custom.git
+cd pi-web-custom
+npm ci
+npm run build
+node bin/pi-web.js --hostname 127.0.0.1 --port 30141 --no-open
+```
+
+Open `http://127.0.0.1:30141`. If the port is occupied, choose another free port.
+The local CLI accepts the same options described below; use `node bin/pi-web.js`
+in place of the globally installed `pi-web` command.
+
+**This customization has not been published to npm.** The upstream npm commands
+below install `@agegr/pi-web`, not the custom features in this repository.
+Keep credentials, sessions, installed plugins and deployment backups outside Git.
+Existing agent data can be reused via `PI_CODING_AGENT_DIR`; do not run concurrent
+agent turns against the same session from multiple servers.
+
+## Overview
 
 Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
 
@@ -9,13 +50,14 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 ## Features
 
 - **Session workspace**: browse, resume, rename, export, and delete conversations grouped by project, with running state, context usage, cost, and compaction details.
+- **Token usage dashboard**: view today/7-day/30-day/all-time totals, daily usage, and model/project breakdowns from saved sessions, with fork-history deduplication, server-side background updates every 30s, and immediate manual refresh. See [Token usage](./docs/token-usage.md).
 - **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
-- **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
+- **Project file tools**: browse/upload/preview files and inspect Git diffs; manually edit UTF-8 text with retained drafts and conflict checks, and create, rename or permanently delete files/folders within the current workspace. See [Workspace files](./docs/workspace-files.md).
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
-- **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
+- **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially; language and theme controls are available in Settings.
 
-## Quick Start
+## Upstream npm package (not this customization)
 
 Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
 
