@@ -69,11 +69,21 @@ export interface AgentUsage {
   };
 }
 
+export interface ModelIdentity {
+  version: 1;
+  selectedModelId: string;
+  selectedProvider: string;
+}
+
 export interface AssistantMessage {
   role: "assistant";
   content: AssistantContentBlock[];
   model: string;
   provider: string;
+  /** Per-request selection snapshot; never inferred from the current session. */
+  modelIdentity?: ModelIdentity;
+  /** Raw provider-reported ID, when actually recorded by the SDK. */
+  responseModel?: string;
   stopReason?: string;
   errorMessage?: string;
   timestamp?: number;

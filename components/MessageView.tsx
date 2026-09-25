@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
+import { ModelIdentityDetails } from "./ModelIdentityDetails";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
@@ -767,7 +768,7 @@ function AssistantMessageView({
           gap: 6,
         }}
       >
-        {message.provider && (
+        {message.provider && typeof message.model === "string" && message.model.length > 0 && (
           <span>{getModelDisplayName(message.provider, message.model, modelNames)}</span>
         )}
         {isStreaming && (() => {
@@ -797,6 +798,8 @@ function AssistantMessageView({
           );
         })()}
       </div>
+
+      <ModelIdentityDetails message={message} />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blockItems.map(({ block, originalIndex }) => (

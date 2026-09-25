@@ -10,6 +10,7 @@ import type {
   AgentLoopTurnUpdate,
   AgentMessage as PiAgentMessage,
   PrepareNextTurnContext,
+  StreamFn,
 } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 
@@ -143,6 +144,7 @@ export interface AgentSessionLike {
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
   readonly agent: {
+    streamFunction?: StreamFn;
     state?: {
       systemPrompt?: string;
       thinkingLevel?: string;

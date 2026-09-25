@@ -8,6 +8,7 @@
 
 ## 本仓库的定制功能
 
+- [逐条回复的模型 ID 详情](./docs/model-identity.md)：分别显示所选模型 ID 和服务端返回的原始 ID；缺失的历史数据明确显示“未记录”。
 - [Token 用量统计](./docs/token-usage.md)：历史用量、按工作目录分组、fork 去重和服务端后台刷新。
 - [工作区文件编辑与管理](./docs/workspace-files.md)：手动保存、草稿保留、冲突检查及文件/文件夹的新建、重命名、删除。
 - [Full 模式搜索工具控制](./docs/adr/0004-full-only-search-tools.md)：普通 Web 会话仅在 Full 预设下启用搜索工具；子智能体继续遵循各自的资源配置。
@@ -28,6 +29,9 @@ node bin/pi-web.js --hostname 127.0.0.1 --port 30141 --no-open
 
 访问 `http://127.0.0.1:30141`。如果端口已占用，请换一个空闲端口。
 下面介绍的命令行选项同样适用；源码版本用 `node bin/pi-web.js` 代替全局 `pi-web` 命令。
+
+安装依赖时会应用带版本和文件校验的 SDK 模型元数据补丁。
+升级 SDK 或禁用安装脚本前，请先看[模型 ID 功能维护说明](./docs/model-identity.md#pinned-sdk-compatibility-patch)。
 
 **本定制版没有单独发布到 npm。** 下方保留的上游 npm 安装命令安装的是 `@agegr/pi-web`，
 不包含本仓库的定制功能。凭据、会话、已安装插件和部署备份不应提交到 Git。

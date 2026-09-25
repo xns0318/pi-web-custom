@@ -42,6 +42,7 @@ import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { resolveShellTools } from "./powershell-settings";
 import { installSearchToolPolicy } from "./search-tool-policy";
+import { installModelIdentityCapture } from "./model-identity-capture";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import {
   appendSessionToolSelection,
@@ -254,6 +255,7 @@ export class AgentSessionWrapper {
     public readonly inner: AgentSessionLike,
     options: AgentSessionWrapperOptions = {},
   ) {
+    installModelIdentityCapture(this.inner.agent);
     this.exactSystemPrompt = options.exactSystemPrompt;
     this.searchToolPolicy = options.toolSelection !== undefined
       ? installSearchToolPolicy(this.inner, options.toolSelection)

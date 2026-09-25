@@ -46,6 +46,52 @@ test("matches response model aliases and otherwise includes the provider", () =>
   assert.equal(getModelDisplayName("gateway", "unknown-model", names), "gateway/unknown-model");
 });
 
+test("model details keep raw IDs separate from friendly labels, including while streaming", () => {
+  const message = {
+    role: "assistant", provider: "gateway", model: "selected-alias",
+    content: [{ type: "text", text: "reply" }],
+    modelIdentity: { version: 1, selectedModelId: "selected-alias", selectedProvider: "gateway" },
+    responseModel: "Vendor/RAW-2026",
+  };
+  for (const isStreaming of [false, true]) {
+    const html = renderMessage(message, { isStreaming, modelNames: { "gateway:selected-alias": "Friendly nickname" } });
+    assert.match(html, /Friendly nickname/);
+    assert.match(html, /<details class="message-model-details"><summary>Model details<\/summary>/);
+    assert.match(html, /Selected model ID: selected-alias/);
+    assert.match(html, /Server-returned ID: Vendor\/RAW-2026/);
+    assert.doesNotMatch(html, /<details[^>]+open/);
+    assert.match(html, /does not verify the underlying model/);
+  }
+});
+
+test("legacy/missing metadata is not inferred from the message model or model-name map", () => {
+  const message = { role: "assistant", provider: "gateway", model: "not-proof", content: [{ type: "text", text: "old reply" }] };
+  const html = renderMessage(message, { modelNames: { "gateway:not-proof": "Current model" } });
+  assert.match(html, /Selected model ID: Not recorded/);
+  assert.match(html, /Server-returned ID: Not recorded/);
+  const legacy = renderMessage({ ...message, responseModel: "saved-raw" });
+  assert.match(legacy, /Selected model ID: Not recorded/);
+  assert.match(legacy, /Server-returned ID: saved-raw/);
+});
+
+test("a malformed or omitted SDK accounting model cannot crash model details", () => {
+  // Anthropic assigns message.model from the provider, even when omitted/invalid.
+  for (const model of [undefined, null, "", 42]) {
+    const html = renderMessage({ role: "assistant", provider: "gateway", model,
+      modelIdentity: { version: 1, selectedModelId: "selected-alias", selectedProvider: "gateway" },
+      content: [{ type: "text", text: "reply" }],
+    });
+    assert.match(html, /Selected model ID: selected-alias/);
+    assert.match(html, /Server-returned ID: Not recorded/);
+  }
+});
+
+test("model details render untrusted returned IDs as escaped text", () => {
+  const html = renderMessage({ role: "assistant", provider: "test", model: "alias", responseModel: '<img src=x onerror="alert(1)">', content: [{ type: "text", text: "reply" }] });
+  assert.match(html, /Server-returned ID: &lt;img/);
+  assert.doesNotMatch(html, /<img src=x/);
+});
+
 test("previews the first thinking line and reveals the full text with the saved default", () => {
   const previousWindow = globalThis.window;
   try {

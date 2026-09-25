@@ -1,0 +1,36 @@
+{
+  "package": "@earendil-works/pi-ai",
+  "version": "0.85.1",
+  "patches": [
+    {
+      "file": "dist/api/openai-completions.js",
+      "sha256": "1e2097ced37cf0e21aa5711297eecc77916de8a4ed81a9019bc7d97b22825fa3",
+      "before": "if (typeof chunk.model === \"string\" && chunk.model.length > 0 && chunk.model !== model.id) {\n                    output.responseModel ||= chunk.model;",
+      "after": "if (typeof chunk.model === \"string\" && chunk.model.length > 0) {\n                    output.responseModel = chunk.model;"
+    },
+    {
+      "file": "dist/api/anthropic-messages.js",
+      "sha256": "f748560c80fe91bb5736b62f6f34c5e2e2bfa224cd5eb959134ca903c226b604",
+      "before": "                    output.model = event.message.model;",
+      "after": "                    if (typeof event.message.model === \"string\" && event.message.model.length > 0) {\n                        output.responseModel = event.message.model;\n                    }\n                    output.model = event.message.model;"
+    },
+    {
+      "file": "dist/api/openai-responses-shared.js",
+      "sha256": "b5d9f001e97bfafa8dfeef2e292f923c39f77fa8aef014132bf3530760f222e3",
+      "before": "    for await (const event of openaiStream) {\n        if (event.type === \"response.created\") {",
+      "after": "    for await (const event of openaiStream) {\n        if (typeof event.response?.model === \"string\" && event.response.model.length > 0) {\n            output.responseModel = event.response.model;\n        }\n        if (event.type === \"response.created\") {"
+    },
+    {
+      "file": "dist/api/google-generative-ai.js",
+      "sha256": "e056d59c2d2b6577d64be29f412b0dbc5377cffdaef3974d1a498b3c52177a45",
+      "before": "                output.responseId ||= chunk.responseId;",
+      "after": "                output.responseId ||= chunk.responseId;\n                if (typeof chunk.modelVersion === \"string\" && chunk.modelVersion.length > 0) {\n                    output.responseModel = chunk.modelVersion;\n                }"
+    },
+    {
+      "file": "dist/api/google-vertex.js",
+      "sha256": "6bb6641da11cc3a0c16a0f0d123075909499d51d275fc4a60e9d5770346e15eb",
+      "before": "                output.responseId ||= chunk.responseId;",
+      "after": "                output.responseId ||= chunk.responseId;\n                if (typeof chunk.modelVersion === \"string\" && chunk.modelVersion.length > 0) {\n                    output.responseModel = chunk.modelVersion;\n                }"
+    }
+  ]
+}

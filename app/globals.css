@@ -1,6 +1,39 @@
 @import "@xterm/xterm/css/xterm.css";
 @import "tailwindcss";
 
+.message-model-details {
+  margin: 0 0 8px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.message-model-details > summary {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.message-model-details > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.message-model-details-body {
+  padding: 8px 10px;
+  margin-top: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.message-model-id {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}
+.message-model-details-note { margin-top: 5px; }
+
 @theme {
   --color-bg: var(--bg);
   --color-bg-panel: var(--bg-panel);

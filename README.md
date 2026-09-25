@@ -9,6 +9,8 @@
 
 ## Custom additions
 
+- [Per-message model identity](./docs/model-identity.md): raw selected and server-returned IDs,
+  with missing history explicitly marked as unrecorded.
 - [Token usage dashboard](./docs/token-usage.md): historical totals, per-directory breakdowns,
   fork deduplication and server-side background refresh.
 - [Workspace editing and file management](./docs/workspace-files.md): explicit saves,
@@ -34,6 +36,10 @@ node bin/pi-web.js --hostname 127.0.0.1 --port 30141 --no-open
 Open `http://127.0.0.1:30141`. If the port is occupied, choose another free port.
 The local CLI accepts the same options described below; use `node bin/pi-web.js`
 in place of the globally installed `pi-web` command.
+
+Dependency installation includes a version/hash-checked SDK metadata patch for model IDs.
+See [model identity maintenance](./docs/model-identity.md#pinned-sdk-compatibility-patch)
+before changing SDK versions or disabling install scripts.
 
 **This customization has not been published to npm.** The upstream npm commands
 below install `@agegr/pi-web`, not the custom features in this repository.
